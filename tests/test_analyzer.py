@@ -122,6 +122,29 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(second_only["commit_count"], 1)
         self.assertEqual(second_only["summary"]["churn"], 2)
 
+    def test_author_merge_combines_metrics_without_changing_history(self) -> None:
+        self.build_history()
+        store, _ = self.analyze()
+        alice = "Alice <alice@example.com>"
+        bob = "Bob <bob@example.com>"
+        merged = "Core Team <team@example.com>"
+
+        store.merge_authors([alice, bob], merged)
+        result = store.query_metrics(author_filter=merged)
+        repository_rows = [
+            row for row in result["authors"] if row["object_type"] == "repository"
+        ]
+
+        self.assertEqual(len(repository_rows), 1)
+        self.assertEqual(repository_rows[0]["author"], merged)
+        self.assertEqual(repository_rows[0]["churn"], 8)
+        self.assertEqual(repository_rows[0]["ownership"], 1.0)
+        self.assertIn(merged, store.filter_options()["authors"])
+
+        store.clear_author_merges()
+        self.assertIn(alice, store.filter_options()["authors"])
+        self.assertIn(bob, store.filter_options()["authors"])
+
     def test_invalid_reference_is_rejected(self) -> None:
         self.build_history()
         with self.assertRaises(AnalysisError):

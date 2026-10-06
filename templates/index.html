@@ -15,8 +15,18 @@
       <span class="brand-mark">R</span>
       <span>Repo Analysis Tool</span>
     </a>
-    {% if has_analysis %}
-      <a class="quiet-link" href="#results">View analysis ↓</a>
+    {% if analyses %}
+      <form class="repository-switcher" method="get" action="{{ url_for('index') }}">
+        <label for="repository-switch">Repository</label>
+        <select id="repository-switch" name="repository">
+          {% for analysis in analyses %}
+            <option value="{{ analysis.id }}" {% if active_analysis and active_analysis.id == analysis.id %}selected{% endif %}>
+              {{ analysis.name }} · {{ analysis.ref_sha[:8] }}
+            </option>
+          {% endfor %}
+        </select>
+        <button type="submit">Open</button>
+      </form>
     {% endif %}
   </header>
 
@@ -88,12 +98,13 @@
         </div>
 
         <form class="panel filters" method="get" action="{{ url_for('index') }}">
+          <input type="hidden" name="repository" value="{{ filters.repository }}">
           <div class="filter-heading">
             <div>
               <p class="eyebrow">03 / Focus</p>
               <h3>Filter the analysis</h3>
             </div>
-            <a href="{{ url_for('index') }}">Reset all</a>
+            <a href="{{ url_for('index', repository=filters.repository) }}">Reset filters</a>
           </div>
           {% if filter_error %}<div class="alert alert-error">{{ filter_error }}</div>{% endif %}
           <div class="filter-grid">
@@ -134,6 +145,39 @@
           </div>
           <button type="submit" class="secondary-button">Apply filters <span>→</span></button>
         </form>
+
+        <details class="panel author-merge">
+          <summary>Merge author identities</summary>
+          <p>Combine aliases into one dashboard identity. Raw commit authors remain unchanged and each repository keeps its own mappings.</p>
+          <form method="post" action="{{ url_for('merge_authors') }}">
+            <input type="hidden" name="repository" value="{{ filters.repository }}">
+            <div class="merge-grid">
+              <div>
+                <label for="source-authors">Source identities</label>
+                <select id="source-authors" name="source_authors" multiple size="6" required>
+                  {% for author in options.raw_authors %}<option value="{{ author }}">{{ author }}</option>{% endfor %}
+                </select>
+                <small>Use Ctrl/Cmd or Shift to select multiple identities.</small>
+              </div>
+              <div>
+                <label for="canonical-author">Merged identity</label>
+                <input id="canonical-author" name="canonical_author" placeholder="Name &lt;email@example.com&gt;" required>
+                <button type="submit" class="secondary-button">Merge selected authors <span>→</span></button>
+              </div>
+            </div>
+          </form>
+          {% if options.author_merges %}
+            <div class="merge-list">
+              {% for mapping in options.author_merges %}
+                <code>{{ mapping.source_author }}</code><span>→</span><strong>{{ mapping.canonical_author }}</strong>
+              {% endfor %}
+            </div>
+            <form method="post" action="{{ url_for('reset_authors') }}">
+              <input type="hidden" name="repository" value="{{ filters.repository }}">
+              <button type="submit" class="quiet-button">Clear all author merges</button>
+            </form>
+          {% endif %}
+        </details>
 
         <section class="summary" aria-label="Metric summary">
           <article class="metric-card accent">

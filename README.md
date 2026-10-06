@@ -35,7 +35,7 @@ The dashboard supports either ingestion method required by the brief:
 
 The optional **Reference** field accepts a branch, tag, or commit SHA and defaults to `HEAD`. RAT analyzes all non-merge commits reachable from that reference.
 
-Imported repositories and the analysis database are stored under `data/`, which is excluded from Git.
+Imported repositories and their analysis databases are stored under `data/`, which is excluded from Git. Completed analyses remain available in the repository switcher, so several repositories can be compared without re-importing them.
 
 ## Filters
 
@@ -47,6 +47,12 @@ After analysis, the dashboard can focus the results by:
 - a manually selected set of full or uniquely abbreviated commit hashes.
 
 A manual commit set overrides the date range. The recent-commit panel can add hashes to the manual selection field.
+
+## Multiple repositories and author merging
+
+Each successful import creates a separate persistent analysis. Use the repository switcher in the header to move between them; filters and author mappings apply only to the active repository.
+
+Open **Merge author identities** to select raw Git identities and combine them under a chosen display identity. Metrics and ownership are regrouped at query time, preserving the original commit metadata. The mappings can be cleared at any time.
 
 ## Metrics
 
@@ -70,7 +76,8 @@ The analyzer follows the assessment definitions:
 - changed renames are attributed to the new path;
 - deleted paths remain represented;
 - binary files are excluded from measured objects; and
-- author identities use the `.mailmap` stored at the selected reference, when present.
+- author identities use the `.mailmap` stored at the selected reference, when present; and
+- user-defined author merges are applied non-destructively when querying metrics.
 
 ## Tests
 
@@ -98,4 +105,4 @@ The checker resolves the CSV's fixed `ref_sha` and compares every repository, di
 
 ## Scope
 
-This submission implements all metric categories, both ingestion methods, fixed-reference analysis, and filtering. It keeps one active repository at a time. Manual author merging and persistent multi-repository switching are not included.
+This submission implements all metric categories, both ingestion methods, fixed-reference analysis, filtering, non-destructive author merging, and persistent multi-repository switching.

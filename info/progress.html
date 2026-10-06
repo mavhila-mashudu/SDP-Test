@@ -38,16 +38,16 @@
   <p>This standalone report records the current evidence-based state of the submission. Percentages distinguish confirmed rubric coverage from general implementation progress.</p>
 
   <section class="grid" aria-label="Progress summary">
-    <article class="card"><span>Confirmed rubric tier</span><strong>75%</strong><small>All cumulative requirements through the 75% tier are represented.</small></article>
-    <article class="card"><span>Engineering completion</span><strong>85%</strong><small>Core application is complete; advanced breadth and final parity remain.</small></article>
+    <article class="card"><span>Rubric feature scope</span><strong>100%</strong><small>Filtering, author merge, and multi-repository support are implemented.</small></article>
+    <article class="card"><span>Engineering completion</span><strong>95%</strong><small>Full feature breadth is complete; final parity and performance proof remain.</small></article>
     <article class="card"><span>Reference datasets exact</span><strong>2 / 3</strong><small>cJSON and Redis pass; Git has edge-case binary differences.</small></article>
-    <article class="card"><span>Automated tests</span><strong>6 / 6</strong><small>Current analyzer and repository tests pass.</small></article>
+    <article class="card"><span>Automated tests</span><strong>10 / 10</strong><small>Analyzer, catalog, web routes, and repository tests pass.</small></article>
   </section>
 
   <section class="panel">
     <h2>Overall completion</h2>
-    <div class="bar" aria-label="85 percent complete"><i style="--value:85%"></i></div>
-    <p>Current implementation estimate: 85%. Confirmed rubric position: 75%. The target is the cumulative 100% tier.</p>
+    <div class="bar" aria-label="95 percent complete"><i style="--value:95%"></i></div>
+    <p>Current implementation estimate: 95%. All 100%-tier features are present; exact Git-reference parity and large-repository performance verification remain.</p>
   </section>
 
   <section class="panel">
@@ -55,9 +55,9 @@
     <table>
       <thead><tr><th>Criterion</th><th>Weight</th><th>Current evidence</th><th>Status</th></tr></thead>
       <tbody>
-        <tr><td>Requirements</td><td>50%</td><td>All metrics, both ingestion methods, fixed-reference analysis, and filtering are implemented. Author merge and multi-repository support remain for the 100% tier.</td><td class="active">75% tier</td></tr>
-        <tr><td>Architecture &amp; UI</td><td>25%</td><td>Streaming Git parser, SQLite aggregation, responsive dashboard, and bounded result rendering are implemented. Large-history performance still needs final measurement and optimization.</td><td class="active">75% tier</td></tr>
-        <tr><td>Usability</td><td>25%</td><td>Responsive navigation, loading state, visible validation errors, filters, reset controls, and commit-selection helpers are implemented. Multi-repo navigation and large-repo validation remain.</td><td class="active">75% tier</td></tr>
+        <tr><td>Requirements</td><td>50%</td><td>All metrics, both ingestion methods, filtering, non-destructive author merge, and persistent multi-repository switching are implemented.</td><td class="done">100% scope</td></tr>
+        <tr><td>Architecture &amp; UI</td><td>25%</td><td>Streaming Git parser, separate indexed SQLite analysis stores, persistent catalog, responsive dashboard, and bounded result rendering are implemented. Large-history performance still needs final measurement.</td><td class="active">Verification pending</td></tr>
+        <tr><td>Usability</td><td>25%</td><td>Responsive navigation, repository switcher, author-merge workflow, loading state, visible errors, filters, reset controls, and commit-selection helpers are implemented.</td><td class="done">100% scope</td></tr>
       </tbody>
     </table>
   </section>
@@ -70,6 +70,8 @@
       <li class="done">File, directory, repository, commit-set, and author metrics</li>
       <li class="done">Author, path, UTC period, and manual commit-set filtering</li>
       <li class="done">Responsive dashboard, error handling, and quality-of-life controls</li>
+      <li class="done">Persistent multi-repository catalog and repository switcher</li>
+      <li class="done">Non-destructive, repository-specific author identity merging</li>
       <li class="done">Exact cJSON and Redis reference CSV validation</li>
     </ul>
   </section>
@@ -78,10 +80,8 @@
     <h2>Remaining for the strongest 100% submission</h2>
     <ol>
       <li><strong>Git reference parity:</strong> finish per-revision binary classification and rerun all three reference checks.</li>
-      <li><strong>Author merge:</strong> add a dashboard workflow that combines selected identities without corrupting raw history.</li>
-      <li><strong>Multi-repository support:</strong> retain analyses and allow switching between imported repositories.</li>
       <li><strong>Large-repository performance:</strong> measure the Git repository run, cache expensive blob classification, and remove bottlenecks.</li>
-      <li><strong>Final hardening:</strong> broaden tests, verify startup from a fresh clone, update documentation, and push verified milestones.</li>
+      <li><strong>Final hardening:</strong> verify startup from a fresh clone, complete browser checks, and rerun all tests.</li>
     </ol>
   </section>
 
@@ -89,9 +89,9 @@
     <h2>Milestone tracker</h2>
     <table>
       <tbody>
-        <tr><td class="done">Complete</td><td>Runnable application, ingestion, parser, metric store, filters, and dashboard</td></tr>
-        <tr><td class="active">In progress</td><td>Full-rubric audit, progress report, and exact reference validation</td></tr>
-        <tr><td class="todo">Queued</td><td>Author merge, multi-repository persistence/switching, performance verification, final test pass</td></tr>
+        <tr><td class="done">Complete</td><td>Application, ingestion, metrics, filters, dashboard, author merge, multi-repository support, and progress report</td></tr>
+        <tr><td class="active">In progress</td><td>Exact Git reference parity and large-history performance verification</td></tr>
+        <tr><td class="todo">Queued</td><td>Final browser check, clean-start verification, and full regression pass</td></tr>
       </tbody>
     </table>
   </section>

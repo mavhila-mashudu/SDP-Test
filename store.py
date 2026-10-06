@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS changes (
     PRIMARY KEY (commit_sha, object_type, path),
     FOREIGN KEY (commit_sha) REFERENCES commits(sha) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS author_aliases (
+    source_author TEXT PRIMARY KEY,
+    canonical_author TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(committed_at);
 CREATE INDEX IF NOT EXISTS idx_commits_author ON commits(author);
 CREATE INDEX IF NOT EXISTS idx_changes_object ON changes(object_type, path);
@@ -91,12 +95,53 @@ class MetricStore:
             rows = connection.execute("SELECT key, value FROM metadata").fetchall()
         return {row["key"]: row["value"] for row in rows}
 
+    def merge_authors(self, source_authors: list[str], canonical_author: str) -> None:
+        sources = list(dict.fromkeys(author.strip() for author in source_authors if author.strip()))
+        canonical = canonical_author.strip()
+        if not sources or not canonical:
+            raise ValueError("Choose author identities and enter their merged identity.")
+        with self.connect() as connection:
+            known = {
+                row[0]
+                for row in connection.execute(
+                    f"SELECT author FROM commits WHERE author IN ({','.join('?' for _ in sources)})",
+                    sources,
+                )
+            }
+            if len(known) != len(sources):
+                raise ValueError("One or more selected author identities are unknown.")
+            connection.executemany(
+                "INSERT OR REPLACE INTO author_aliases(source_author, canonical_author) VALUES (?, ?)",
+                ((source, canonical) for source in sources),
+            )
+
+    def clear_author_merges(self) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM author_aliases")
+
     def filter_options(self) -> dict[str, list]:
         with self.connect() as connection:
-            authors = [
+            raw_authors = [
                 row[0]
                 for row in connection.execute(
                     "SELECT DISTINCT author FROM commits ORDER BY author COLLATE NOCASE"
+                )
+            ]
+            authors = [
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT DISTINCT COALESCE(am.canonical_author, c.author) AS author
+                    FROM commits c
+                    LEFT JOIN author_aliases am ON am.source_author = c.author
+                    ORDER BY author COLLATE NOCASE
+                    """
+                )
+            ]
+            author_merges = [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT source_author, canonical_author FROM author_aliases ORDER BY canonical_author, source_author"
                 )
             ]
             objects = [
@@ -117,14 +162,22 @@ class MetricStore:
                 dict(row)
                 for row in connection.execute(
                     """
-                    SELECT sha, committed_at, author
-                    FROM commits
-                    ORDER BY committed_at DESC, sha
+                    SELECT c.sha, c.committed_at,
+                           COALESCE(am.canonical_author, c.author) AS author
+                    FROM commits c
+                    LEFT JOIN author_aliases am ON am.source_author = c.author
+                    ORDER BY c.committed_at DESC, c.sha
                     LIMIT 250
                     """
                 )
             ]
-        return {"authors": authors, "objects": objects, "commits": commits}
+        return {
+            "authors": authors,
+            "raw_authors": raw_authors,
+            "author_merges": author_merges,
+            "objects": objects,
+            "commits": commits,
+        }
 
     def resolve_commit_tokens(self, tokens: list[str]) -> tuple[list[str], list[str]]:
         resolved: list[str] = []
@@ -232,21 +285,24 @@ class MetricStore:
             author_clause = ""
             author_values: list = []
             if author_filter:
-                author_clause = " AND c.author = ?"
+                author_clause = " AND COALESCE(am.canonical_author, c.author) = ?"
                 author_values.append(author_filter)
             author_sql = f"""
-                SELECT ch.object_type, ch.path, c.author,
+                SELECT ch.object_type, ch.path,
+                       COALESCE(am.canonical_author, c.author) AS author,
                        SUM(ch.added) AS added,
                        SUM(ch.removed) AS removed,
                        SUM(CASE WHEN ch.added + ch.removed > 0 THEN 1 ELSE 0 END)
                            AS modifications
                 FROM changes ch
                 JOIN commits c ON c.sha = ch.commit_sha
+                LEFT JOIN author_aliases am ON am.source_author = c.author
                 WHERE {condition}{object_clause}{author_clause}
-                GROUP BY ch.object_type, ch.path, c.author
+                GROUP BY ch.object_type, ch.path,
+                         COALESCE(am.canonical_author, c.author)
                 HAVING SUM(ch.added) + SUM(ch.removed) > 0
                 ORDER BY (SUM(ch.added) + SUM(ch.removed)) DESC,
-                         c.author COLLATE NOCASE,
+                         author COLLATE NOCASE,
                          ch.path COLLATE NOCASE
             """
             author_rows_raw = connection.execute(
