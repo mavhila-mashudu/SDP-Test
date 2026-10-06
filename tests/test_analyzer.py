@@ -108,6 +108,13 @@ class AnalyzerTests(unittest.TestCase):
             repository_authors["Alice <alice@example.com>"]["ownership"], 0.75
         )
 
+        limited = store.query_metrics(limit=1)
+        self.assertEqual(len(limited["objects"]), 1)
+        self.assertEqual(len(limited["authors"]), 1)
+        self.assertGreater(limited["total_objects"], 1)
+        self.assertGreater(limited["total_author_rows"], 1)
+        self.assertEqual(limited["authors"][0]["ownership"], 0.75)
+
     def test_reference_and_commit_filters(self) -> None:
         first, second, _ = self.build_history()
         store, metadata = self.analyze(second)
@@ -121,6 +128,23 @@ class AnalyzerTests(unittest.TestCase):
         second_only = store.query_metrics(start=1_700_000_100, end=1_700_000_200)
         self.assertEqual(second_only["commit_count"], 1)
         self.assertEqual(second_only["summary"]["churn"], 2)
+
+    def test_binary_attributes_are_resolved_at_each_revision(self) -> None:
+        (self.repo / ".gitattributes").write_text("fixture.bin binary\n", encoding="utf-8")
+        (self.repo / "fixture.bin").write_text("printable payload\n", encoding="utf-8")
+        (self.repo / "opaque.dat").write_bytes(b"\xc2\x0bcompressed-like\ncontent\n")
+        self.commit("add attributed binary", 1_700_000_000, "Alice", "alice@example.com")
+        (self.repo / ".gitattributes").unlink()
+        (self.repo / "fixture.bin").unlink()
+        self.commit("remove attributed binary", 1_700_000_100, "Bob", "bob@example.com")
+
+        store, _ = self.analyze()
+        objects = {
+            (row["object_type"], row["path"]): row for row in store.query_metrics()["objects"]
+        }
+
+        self.assertNotIn(("file", "fixture.bin"), objects)
+        self.assertIn(("file", "opaque.dat"), objects)
 
     def test_author_merge_combines_metrics_without_changing_history(self) -> None:
         self.build_history()

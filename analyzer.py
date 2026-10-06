@@ -84,10 +84,20 @@ def _decode(value: bytes) -> str:
     return value.decode("utf-8", errors="replace")
 
 
-def _contains_binary_content(repo_path: Path, sha: str, path: str) -> bool:
+def _has_binary_attribute(repo_path: Path, sha: str, path: str) -> bool:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_path), "show", f"{sha}:{path}"],
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "check-attr",
+                f"--source={sha}",
+                "-z",
+                "diff",
+                "--",
+                path,
+            ],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -95,18 +105,8 @@ def _contains_binary_content(repo_path: Path, sha: str, path: str) -> bool:
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
-    sample = result.stdout[:8000]
-    if b"\x00" in sample:
-        return True
-    if not sample:
-        return False
-    try:
-        sample.decode("utf-8")
-    except UnicodeDecodeError:
-        return True
-    allowed_controls = {8, 9, 10, 12, 13, 27}
-    non_text = sum(byte < 32 and byte not in allowed_controls for byte in sample)
-    return non_text / len(sample) > 0.30
+    fields = result.stdout.split(b"\x00")
+    return len(fields) >= 3 and fields[2] == b"unset"
 
 
 def _add_object_change(
@@ -183,7 +183,6 @@ def iter_commit_records(
     committed_at = 0
     author = ""
     totals: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
-    binary_paths: set[str] = set()
     try:
         for raw_token in tokens:
             token = raw_token.lstrip(b"\r\n")
@@ -218,27 +217,18 @@ def iter_commit_records(
                 except StopIteration as exc:
                     raise AnalysisError("Git returned an incomplete rename record.") from exc
             if added_raw == b"-" or removed_raw == b"-":
-                binary_paths.add(changed_path)
                 continue
             try:
                 added = int(added_raw)
                 removed = int(removed_raw)
             except ValueError as exc:
                 raise AnalysisError("Git returned invalid line statistics.") from exc
-            if old_path in binary_paths:
-                binary_paths.discard(old_path)
-                binary_paths.add(changed_path)
+            attribute_sha = f"{sha}^" if added == 0 and removed > 0 else sha
+            attribute_path = old_path if old_path and added == 0 else changed_path
+            if added + removed <= 2 and _has_binary_attribute(
+                path, attribute_sha, attribute_path
+            ):
                 continue
-            if added == 0 and changed_path in binary_paths:
-                binary_paths.discard(changed_path)
-                continue
-            if added > 0 and added + removed <= 2:
-                if _contains_binary_content(path, sha, changed_path):
-                    binary_paths.add(changed_path)
-                    continue
-                binary_paths.discard(changed_path)
-            elif changed_path in binary_paths:
-                binary_paths.discard(changed_path)
             if old_path:
                 _add_path_changes(totals, old_path, 0, 0)
             _add_path_changes(totals, changed_path, added, removed)

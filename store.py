@@ -252,6 +252,8 @@ class MetricStore:
         if object_filter:
             object_clause = " AND ch.object_type = ? AND ch.path = ?"
             object_values.extend(object_filter)
+        limit_clause = " LIMIT ?" if limit is not None else ""
+        limit_values = [limit] if limit is not None else []
 
         with self.connect() as connection:
             commit_count = int(
@@ -265,7 +267,8 @@ class MetricStore:
                        SUM(ch.added) AS added,
                        SUM(ch.removed) AS removed,
                        SUM(CASE WHEN ch.added + ch.removed > 0 THEN 1 ELSE 0 END)
-                           AS modifications
+                           AS modifications,
+                       COUNT(*) OVER() AS total_rows
                 FROM changes ch
                 JOIN commits c ON c.sha = ch.commit_sha
                 WHERE {condition}{object_clause}
@@ -276,47 +279,61 @@ class MetricStore:
                     ELSE 2 END,
                     (SUM(ch.added) + SUM(ch.removed)) DESC,
                     ch.path COLLATE NOCASE
+                {limit_clause}
             """
+            object_rows_raw = connection.execute(
+                object_sql, values + object_values + limit_values
+            ).fetchall()
             object_rows = [
-                self._metric_row(row, commit_count)
-                for row in connection.execute(object_sql, values + object_values)
+                self._metric_row(row, commit_count) for row in object_rows_raw
             ]
 
-            author_clause = ""
-            author_values: list = []
-            if author_filter:
-                author_clause = " AND COALESCE(am.canonical_author, c.author) = ?"
-                author_values.append(author_filter)
+            author_where = "WHERE author = ?" if author_filter else ""
+            author_values = [author_filter] if author_filter else []
             author_sql = f"""
-                SELECT ch.object_type, ch.path,
-                       COALESCE(am.canonical_author, c.author) AS author,
-                       SUM(ch.added) AS added,
-                       SUM(ch.removed) AS removed,
-                       SUM(CASE WHEN ch.added + ch.removed > 0 THEN 1 ELSE 0 END)
-                           AS modifications
-                FROM changes ch
-                JOIN commits c ON c.sha = ch.commit_sha
-                LEFT JOIN author_aliases am ON am.source_author = c.author
-                WHERE {condition}{object_clause}{author_clause}
-                GROUP BY ch.object_type, ch.path,
-                         COALESCE(am.canonical_author, c.author)
-                HAVING SUM(ch.added) + SUM(ch.removed) > 0
-                ORDER BY (SUM(ch.added) + SUM(ch.removed)) DESC,
+                WITH selected_changes AS (
+                    SELECT ch.object_type, ch.path, ch.added, ch.removed,
+                           COALESCE(am.canonical_author, c.author) AS author
+                    FROM changes ch
+                    JOIN commits c ON c.sha = ch.commit_sha
+                    LEFT JOIN author_aliases am ON am.source_author = c.author
+                    WHERE {condition}{object_clause}
+                ),
+                author_metrics AS (
+                    SELECT object_type, path, author,
+                           SUM(added) AS added,
+                           SUM(removed) AS removed,
+                           SUM(CASE WHEN added + removed > 0 THEN 1 ELSE 0 END)
+                               AS modifications
+                    FROM selected_changes
+                    {author_where}
+                    GROUP BY object_type, path, author
+                    HAVING SUM(added) + SUM(removed) > 0
+                ),
+                object_totals AS (
+                    SELECT object_type, path, SUM(added) + SUM(removed) AS total_churn
+                    FROM selected_changes
+                    GROUP BY object_type, path
+                )
+                SELECT author_metrics.*, object_totals.total_churn,
+                       COUNT(*) OVER() AS total_rows
+                FROM author_metrics
+                JOIN object_totals USING (object_type, path)
+                ORDER BY added + removed DESC,
                          author COLLATE NOCASE,
-                         ch.path COLLATE NOCASE
+                         path COLLATE NOCASE
+                {limit_clause}
             """
             author_rows_raw = connection.execute(
-                author_sql, values + object_values + author_values
+                author_sql,
+                values + object_values + author_values + limit_values,
             ).fetchall()
 
-        totals = {
-            (row["object_type"], row["path"]): row["churn"] for row in object_rows
-        }
         author_rows = []
         for row in author_rows_raw:
             metric = self._metric_row(row, commit_count)
             metric["author"] = row["author"]
-            total_churn = totals.get((row["object_type"], row["path"]), 0)
+            total_churn = int(row["total_churn"] or 0)
             metric["ownership"] = metric["churn"] / total_churn if total_churn else 0.0
             author_rows.append(metric)
 
@@ -328,11 +345,10 @@ class MetricStore:
             ),
             object_rows[0] if object_rows else self.empty_metric(),
         )
-        total_objects = len(object_rows)
-        total_author_rows = len(author_rows)
-        if limit is not None:
-            object_rows = object_rows[:limit]
-            author_rows = author_rows[:limit]
+        total_objects = int(object_rows_raw[0]["total_rows"]) if object_rows_raw else 0
+        total_author_rows = (
+            int(author_rows_raw[0]["total_rows"]) if author_rows_raw else 0
+        )
 
         return {
             "commit_count": commit_count,
