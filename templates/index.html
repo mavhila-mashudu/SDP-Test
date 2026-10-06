@@ -3,18 +3,255 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A local dashboard for Git repository metrics.">
   <title>Repo Analysis Tool</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">
+      <span class="brand-mark">R</span>
+      <span>Repo Analysis Tool</span>
+    </a>
+    {% if has_analysis %}
+      <a class="quiet-link" href="#results">View analysis ↓</a>
+    {% endif %}
+  </header>
+
   <main class="shell">
-    <p class="eyebrow">Repository intelligence</p>
-    <h1>Repo Analysis Tool</h1>
-    <p class="lede">Inspect change, churn, ownership, and activity across Git history.</p>
-    <section class="panel">
-      <h2>Ready for a repository</h2>
-      <p>The ingestion and analysis workflow will be added in the next stage.</p>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Git repository intelligence</p>
+        <h1>Find where the<br><span>work happens.</span></h1>
+        <p class="lede">Measure growth, churn, ownership, and modification frequency across every file, directory, author, and commit.</p>
+      </div>
+      <div class="hero-stat">
+        <span>Analysis model</span>
+        <strong>Non-merge history</strong>
+        <small>50% rename detection · binary files excluded</small>
+      </div>
     </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }}" role="alert">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <section class="ingest-grid" aria-labelledby="ingest-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">01 / Import</p>
+          <h2 id="ingest-title">Choose a repository</h2>
+        </div>
+        <p>Use a complete public clone or a ZIP that includes its <code>.git</code> data.</p>
+      </div>
+
+      <form class="panel ingest-card analyzing-form" method="post" action="{{ url_for('analyze') }}">
+        <input type="hidden" name="source_type" value="url">
+        <div class="card-icon">↗</div>
+        <h3>Clone from URL</h3>
+        <p>Fetch the full reachable history from a public HTTP(S) remote.</p>
+        <label for="repository-url">Repository URL</label>
+        <input id="repository-url" name="repository_url" type="url" placeholder="https://github.com/org/project.git" required>
+        <label for="url-reference">Reference</label>
+        <input id="url-reference" name="reference" value="HEAD" placeholder="HEAD, branch, tag, or commit SHA">
+        <button type="submit">Clone &amp; analyze <span>→</span></button>
+      </form>
+
+      <form class="panel ingest-card analyzing-form" method="post" action="{{ url_for('analyze') }}" enctype="multipart/form-data">
+        <input type="hidden" name="source_type" value="zip">
+        <div class="card-icon">⇧</div>
+        <h3>Upload Git ZIP</h3>
+        <p>Upload up to 200 MB. The archive must contain a readable <code>.git</code> entry.</p>
+        <label for="repository-zip">Repository ZIP</label>
+        <input id="repository-zip" name="repository_zip" type="file" accept=".zip,application/zip" required>
+        <label for="zip-reference">Reference</label>
+        <input id="zip-reference" name="reference" value="HEAD" placeholder="HEAD, branch, tag, or commit SHA">
+        <button type="submit">Upload &amp; analyze <span>→</span></button>
+      </form>
+    </section>
+
+    {% if has_analysis and metrics %}
+      <section id="results" class="results">
+        <div class="repository-banner">
+          <div>
+            <p class="eyebrow">02 / Active analysis</p>
+            <h2>{{ metadata.name }}</h2>
+          </div>
+          <dl>
+            <div><dt>Reference</dt><dd><code>{{ metadata.ref_sha[:12] }}</code></dd></div>
+            <div><dt>History</dt><dd>{{ metadata.commit_count|integer }} commits</dd></div>
+          </dl>
+        </div>
+
+        <form class="panel filters" method="get" action="{{ url_for('index') }}">
+          <div class="filter-heading">
+            <div>
+              <p class="eyebrow">03 / Focus</p>
+              <h3>Filter the analysis</h3>
+            </div>
+            <a href="{{ url_for('index') }}">Reset all</a>
+          </div>
+          {% if filter_error %}<div class="alert alert-error">{{ filter_error }}</div>{% endif %}
+          <div class="filter-grid">
+            <div class="field wide">
+              <label for="object">File or directory</label>
+              <select id="object" name="object">
+                <option value="">Entire repository</option>
+                {% for object in options.objects %}
+                  {% set object_value = object.object_type ~ ':' ~ object.path %}
+                  <option value="{{ object_value }}" {% if filters.object == object_value %}selected{% endif %}>
+                    {{ object.object_type|capitalize }} · {{ object.path }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field wide">
+              <label for="author">Author contribution rows</label>
+              <select id="author" name="author">
+                <option value="">All authors</option>
+                {% for author in options.authors %}
+                  <option value="{{ author }}" {% if filters.author == author %}selected{% endif %}>{{ author }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="start">From (UTC, inclusive)</label>
+              <input id="start" name="start" type="datetime-local" value="{{ filters.start }}">
+            </div>
+            <div class="field">
+              <label for="end">Until (UTC, exclusive)</label>
+              <input id="end" name="end" type="datetime-local" value="{{ filters.end }}">
+            </div>
+            <div class="field full">
+              <label for="commits">Manual commit set</label>
+              <textarea id="commits" name="commits" rows="2" placeholder="Paste full or unique abbreviated hashes, separated by spaces, commas, or lines">{{ filters.commits }}</textarea>
+              <small>When provided, manual commits override the date range.</small>
+            </div>
+          </div>
+          <button type="submit" class="secondary-button">Apply filters <span>→</span></button>
+        </form>
+
+        <section class="summary" aria-label="Metric summary">
+          <article class="metric-card accent">
+            <span>Selected commits</span>
+            <strong>{{ metrics.commit_count|integer }}</strong>
+            <small>non-merge commits in H</small>
+          </article>
+          <article class="metric-card">
+            <span>Lines added</span>
+            <strong>+{{ metrics.summary.added|integer }}</strong>
+            <small>{{ metrics.summary.path }}</small>
+          </article>
+          <article class="metric-card">
+            <span>Lines removed</span>
+            <strong>−{{ metrics.summary.removed|integer }}</strong>
+            <small>{{ metrics.summary.path }}</small>
+          </article>
+          <article class="metric-card">
+            <span>Growth</span>
+            <strong>{% if metrics.summary.growth > 0 %}+{% endif %}{{ metrics.summary.growth|integer }}</strong>
+            <small>added − removed</small>
+          </article>
+          <article class="metric-card">
+            <span>Churn</span>
+            <strong>{{ metrics.summary.churn|integer }}</strong>
+            <small>{{ metrics.summary.churn_rate|decimal }} per commit</small>
+          </article>
+          <article class="metric-card">
+            <span>Modifications</span>
+            <strong>{{ metrics.summary.modifications|integer }}</strong>
+            <small>{{ metrics.summary.modification_frequency|percent }} frequency</small>
+          </article>
+        </section>
+
+        <section class="panel data-panel">
+          <div class="table-heading">
+            <div>
+              <p class="eyebrow">04 / Objects</p>
+              <h3>Repository surface</h3>
+            </div>
+            <span>Showing {{ metrics.objects|length|integer }} of {{ metrics.total_objects|integer }}</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Type / path</th><th>Added</th><th>Removed</th><th>Growth</th><th>Churn</th><th>Mods</th><th>Frequency</th><th>Rate</th></tr></thead>
+              <tbody>
+                {% for row in metrics.objects %}
+                  <tr>
+                    <td class="path-cell"><span class="type-pill type-{{ row.object_type }}">{{ row.object_type }}</span><code title="{{ row.path }}">{{ row.path }}</code></td>
+                    <td class="positive">+{{ row.added|integer }}</td>
+                    <td class="negative">−{{ row.removed|integer }}</td>
+                    <td>{% if row.growth > 0 %}+{% endif %}{{ row.growth|integer }}</td>
+                    <td><span class="bar" style="--amount: {{ ([row.churn / (metrics.summary.churn or 1) * 100, 100]|min) }}%">{{ row.churn|integer }}</span></td>
+                    <td>{{ row.modifications|integer }}</td>
+                    <td>{{ row.modification_frequency|percent }}</td>
+                    <td>{{ row.churn_rate|decimal }}</td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="8" class="empty">No measured objects match this commit set.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel data-panel">
+          <div class="table-heading">
+            <div>
+              <p class="eyebrow">05 / Ownership</p>
+              <h3>Author impact</h3>
+            </div>
+            <span>Showing {{ metrics.authors|length|integer }} of {{ metrics.total_author_rows|integer }}</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Author / object</th><th>Added</th><th>Removed</th><th>Growth</th><th>Churn</th><th>Mods</th><th>Ownership</th></tr></thead>
+              <tbody>
+                {% for row in metrics.authors %}
+                  <tr>
+                    <td class="author-cell"><strong>{{ row.author }}</strong><small>{{ row.object_type }} · {{ row.path }}</small></td>
+                    <td class="positive">+{{ row.added|integer }}</td>
+                    <td class="negative">−{{ row.removed|integer }}</td>
+                    <td>{% if row.growth > 0 %}+{% endif %}{{ row.growth|integer }}</td>
+                    <td>{{ row.churn|integer }}</td>
+                    <td>{{ row.modifications|integer }}</td>
+                    <td><span class="ownership"><i style="--ownership: {{ row.ownership * 100 }}%"></i>{{ row.ownership|percent }}</span></td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="7" class="empty">No author contributions match these filters.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <details class="panel commit-help">
+          <summary>Recent commit hashes for manual selection</summary>
+          <div class="commit-list">
+            {% for commit in options.commits[:30] %}
+              <button type="button" class="commit-copy" data-sha="{{ commit.sha }}" title="Add to manual commit set">
+                <code>{{ commit.sha[:10] }}</code><span>{{ commit.author }}</span><time>{{ commit.committed_at|utcdate }}</time>
+              </button>
+            {% endfor %}
+          </div>
+        </details>
+      </section>
+    {% else %}
+      <section class="empty-state">
+        <span>→</span>
+        <p>Import a repository to open the dashboard.</p>
+      </section>
+    {% endif %}
   </main>
+
+  <div class="loading-overlay" hidden aria-live="polite">
+    <div class="loader"></div>
+    <strong>Reading Git history…</strong>
+    <span>Large repositories can take several minutes.</span>
+  </div>
 </body>
 </html>
